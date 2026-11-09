@@ -18,8 +18,11 @@ def score_recording(
     rate: int,
     fingerprints: Sequence[Fingerprint],
     p: MelParams = DEFAULT_MEL,
+    *,
+    gain_db: float = 0.0,
 ) -> dict[str, np.ndarray]:
     y = resample(np.asarray(samples, dtype=np.float32), rate, p.sample_rate)
+    y = y * (10.0 ** (gain_db / 20.0))
     feats = log_mel(y, p)
     return {fp.name: score_sequence(feats, fp) for fp in fingerprints}
 

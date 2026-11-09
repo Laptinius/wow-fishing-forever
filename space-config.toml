@@ -1,0 +1,28 @@
+[game]
+cast_key = "space"
+interact_key = "space"
+session_minutes = 0
+recast_key = "ctrl+space"
+
+[vision]
+icon_size_px = 0
+icon_native_size = 0
+icon_threshold = 0.75
+match_width = 1920
+cast_bar_region = "auto"
+
+[audio]
+capture = "game"
+device = ""
+bite_threshold = 0.64
+refractory_s = 3.0
+gain_db = 36.0
+
+[run]
+recast_delay_s = 2.0
+post_catch_delay_s = 0.3
+bite_arm_s = 0.75
+loot_timeout_s = 3.0
+key_hold_ms = 160
+movement_pause_enabled = true
+movement_pause_s = 2.0

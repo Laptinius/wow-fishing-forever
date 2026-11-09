@@ -140,31 +140,21 @@ def probe_input() -> ProbeResult:
 
 
 def probe_calibration() -> ProbeResult:
+    """Check the current bar templates; legacy gear calibration is optional."""
+    from wowfish.assets import asset_dir
     from wowfish.config import ConfigError, load_config
-    from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
-    hint = (
-        "run `wowfish calibrate --save` on a screenshot showing the gear icon (or the GUI's Setup)"
-    )
     try:
         cfg, _ = load_config()
-    except ConfigError as e:
-        return ProbeResult("calibration", "fail", str(e))
-    size = cfg.vision.icon_size_px
-    if size <= 0:
-        return ProbeResult("calibration", "warn", f"icon not calibrated; {hint}")
-    w = find_window("World of Warcraft")
-    if w is None:
-        return ProbeResult("calibration", "warn", f"{size} px (no game window to check it against)")
-    px = round(size * min(1.0, cfg.vision.match_width / w.width))
-    if px < MIN_TEMPLATE_PX:
+    except ConfigError as error:
+        return ProbeResult("vision", "fail", str(error))
+    files = [asset_dir() / "fishing_bar" / f"label-{lang}.png" for lang in ("ru", "en")]
+    if not all(path.is_file() for path in files):
         return ProbeResult(
-            "calibration",
-            "fail",
-            f"{size} px is {px} px after downscaling this {w.width}-wide window "
-            f"(minimum {MIN_TEMPLATE_PX}); {hint}",
+            "vision", "fail", "fishing bar templates missing; rebuild the application"
         )
-    return ProbeResult("calibration", "ok", f"{size} px ({px} px in the matcher)")
+    mode = "configured region" if cfg.vision.bar_region() else "automatic Fishing / Рыболовля"
+    return ProbeResult("vision", "ok", mode)
 
 
 def probe_config() -> ProbeResult:

@@ -1,5 +1,5 @@
 """Turns engine events into the words the console prints and the GUI shows, and owns the
-engine thread and the setup workers (meter, calibration grab, bite recording). No Tk here."""
+engine thread and the setup workers (meter and bite recording). No Tk here."""
 
 from __future__ import annotations
 
@@ -32,12 +32,12 @@ def describe(event: ev.Event) -> str:
     match event:
         case ev.StateChanged(did=did, next=nxt):
             return f"{did}. {nxt}."
-        case ev.IconFound(score=score, where=(x, y)):
-            return f"Found the bobber at ({x}, {y}), score {score:.2f}"
-        case ev.Calibrated(size=size, score=score):
-            return f"Measured the gear icon at {size} px (score {score:.2f})"
-        case ev.IconLost():
-            return "Lost sight of the bobber"
+        case ev.CastSeen(manual=manual):
+            return (
+                "Увидел ручной/уже начатый заброс"
+                if manual
+                else "Новый заброс подтверждён полоской"
+            )
         case ev.BiteHeard(clip=clip, score=score):
             return f"Heard the splash ({score:.2f}, {clip})"
         case ev.KeyPressed(key=key, why="cast"):
@@ -45,7 +45,13 @@ def describe(event: ev.Event) -> str:
         case ev.KeyPressed(key=key):
             return f"Pressed {key} to interact"
         case ev.Caught():
-            return "Caught something; the bobber is gone"
+            return "После подсечки полоска исчезла — готовлю следующий заброс"
+        case ev.Timeout(what="bar", detail=detail):
+            return detail
+        case ev.Timeout(what="cast", detail=detail):
+            return detail
+        case ev.Timeout(what="loot"):
+            return "После подсечки полоска осталась — продолжаю наблюдение"
         case ev.Timeout(what="icon", after_s=s):
             return f"No gear icon within {s:g} s; recasting"
         case ev.Timeout(what="bite", after_s=s, detail=detail) if detail:
@@ -71,12 +77,6 @@ def describe(event: ev.Event) -> str:
 
 
 # -- results of the setup workers ---------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class CalibrateDone:
-    calibration: Any  # vision.calibrate.Calibration
-    thumbnail_png: bytes
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,9 @@ class View:
     new_lines: list[str] = field(default_factory=list)
     log_events: list[object] = field(default_factory=list)
     trace: ScoreTrace = field(default_factory=ScoreTrace)
+    progress: ev.Progress = field(
+        default_factory=lambda: ev.Progress(0, "stopped", "Готово к запуску")
+    )
 
 
 class _Meter:
@@ -155,12 +158,10 @@ class Presenter:
         list_devices: Callable[[], list[Any]] | None = None,
         open_capture: Callable[..., Any] | None = None,
         find_window: Callable[..., Any] | None = None,
-        get_capturer: Callable[[], Any] | None = None,
     ) -> None:
         from wowfish.audio.devices import GAME, GAME_CHOICE, LoopbackDevice, list_loopback_devices
         from wowfish.audio.devices import open_capture as real_open
         from wowfish.capture import find_window as real_find
-        from wowfish.capture import get_capturer as real_capturer
         from wowfish.engine.engine import build_engine as real_build
 
         self._build_engine = build_engine or real_build
@@ -170,20 +171,21 @@ class Presenter:
         self._game_choice = GAME_CHOICE
         self._device_type = LoopbackDevice
         self._find_window = find_window or real_find
-        self._get_capturer = get_capturer or real_capturer
 
         self.cfg: Config = load_config()[0]
         self._results: queue.Queue[object] = queue.Queue()
         self._thread: EngineThread | None = None
         self._meter: _Meter | None = None
         self.state = State.IDLE.name
-        self.did = "Not started"
-        self.next = "Press Start when the game is at the water"
+        self.did = "Ожидание запуска"
+        self.next = "Встань возле воды и нажми «Запустить»"
         self.stats = ev.Stats(0.0).as_line()
         self.thumbnail_png: bytes | None = None
         self._before_pause: tuple[str, str, str] | None = None
-        self.last_calibration: CalibrateDone | None = None
         self.trace = ScoreTrace()
+        self.progress = ev.Progress(0, "stopped", "Готово к запуску")
+        self._live_level = -120.0
+        self._live_scores: dict[str, float] = {}
 
     # -- config -----------------------------------------------------------------------------
 
@@ -225,19 +227,6 @@ class Presenter:
         window = self._find_window(GAME_TITLE) if selector == self._game else None
         return self._open_capture(selector, pid=window.pid if window else None, title=GAME_TITLE)
 
-    def save_calibration(self) -> None:
-        if self.last_calibration is None:
-            raise ValueError("calibrate first")
-        cal = self.last_calibration.calibration
-        vision = replace(
-            self.cfg.vision,
-            icon_size_px=cal.icon_size_px,
-            icon_native_size=cal.native_size,
-            icon_threshold=cal.suggested_threshold(),
-        )
-        save_config(replace(self.cfg, vision=vision))
-        self.reload()
-
     def save_bite_threshold(self, value: str) -> float:
         """Check and save the bite threshold typed on the Setup tab; the bot uses it from the
         next Start. Raises ValueError with a plain message when it is not a number in (0, 1]."""
@@ -255,7 +244,6 @@ class Presenter:
     def prerequisites(self) -> list[str]:
         """What blocks Start, in plain words; empty when the bot can run."""
         from wowfish.engine.engine import unsupported_platform
-        from wowfish.vision.matcher import MIN_TEMPLATE_PX
 
         reasons: list[str] = []
         problem = unsupported_platform()
@@ -264,14 +252,31 @@ class Presenter:
         window = self._find_window("World of Warcraft")
         if window is None and not problem:
             reasons.append("World of Warcraft window not found; is the game running?")
-        size = self.cfg.vision.icon_size_px
-        if size > 0 and window is not None:
-            px = round(size * min(1.0, self.cfg.vision.match_width / window.width))
-            if px < MIN_TEMPLATE_PX:
-                reasons.append("the calibrated icon is too small for this window; recalibrate")
         if not self.audio_devices():
             reasons.append("no loopback audio device found")
         return reasons
+
+    def save_recast_delay(self, value: str) -> float:
+        try:
+            seconds = float(value)
+        except ValueError:
+            raise ValueError("Введите число секунд") from None
+        if not 0.5 <= seconds <= 30:
+            raise ValueError("Допустимо от 0.5 до 30 секунд")
+        self.reload()
+        save_config(replace(self.cfg, run=replace(self.cfg.run, recast_delay_s=seconds)))
+        self.reload()
+        return seconds
+
+    def save_movement_pause(self, enabled: bool) -> None:
+        self.reload()
+        run = replace(
+            self.cfg.run,
+            movement_pause_enabled=enabled,
+            movement_pause_s=2.0,
+        )
+        save_config(replace(self.cfg, run=run))
+        self.reload()
 
     # -- the bot ----------------------------------------------------------------------------
 
@@ -282,6 +287,7 @@ class Presenter:
     def start(self, minutes: float | None = None) -> None:
         if self.running:
             return
+        self.stop_meter()
         self.reload()
         try:
             session_s = None if minutes is None else minutes * 60
@@ -292,8 +298,8 @@ class Presenter:
         self._thread = EngineThread(engine)
         self._thread.start()
         self.state = State.IDLE.name
-        self.did = "Started"
-        self.next = "Casting"
+        self.did = "Запущено"
+        self.next = "Проверяю полоску рыбалки"
 
     def stop(self) -> None:
         if self._thread is not None:
@@ -317,6 +323,17 @@ class Presenter:
                     break
                 if isinstance(event, ev.Scores):  # the graph's feed: not a log line
                     self._add_scores(event)
+                    self._live_scores = event.peaks
+                    self._live_level = event.level_dbfs
+                    continue
+                if isinstance(event, ev.Progress):
+                    self.progress = event
+                    continue
+                if isinstance(event, ev.FrameObserved):
+                    thumb = (
+                        image.with_box(event.thumbnail, event.box) if event.box else event.thumbnail
+                    )
+                    self.thumbnail_png = image.bgr_to_png_bytes(thumb)
                     continue
                 items.append(event)
                 lines.append(describe(event))
@@ -333,7 +350,7 @@ class Presenter:
             lines.append(self._describe_result(item))
         return View(
             self.state, self.did, self.next, self.stats, self.thumbnail_png, self.running,
-            self.level_dbfs, self.last_scores, lines, items, self.trace,
+            self.level_dbfs, self.last_scores, lines, items, self.trace, self.progress,
         )  # fmt: skip
 
     def _add_scores(self, event: ev.Scores) -> None:
@@ -345,8 +362,7 @@ class Presenter:
         match event:
             case ev.StateChanged(state=state, did=did, next=nxt):
                 self.state, self.did, self.next = state.name, did, nxt
-            case ev.IconFound(thumbnail=thumb, box=box):
-                self.thumbnail_png = image.bgr_to_png_bytes(image.with_box(thumb, box))
+            case ev.CastSeen():
                 self.trace = ScoreTrace(
                     t0=event.t, threshold=self.trace.threshold, version=self.trace.version + 1
                 )
@@ -359,8 +375,11 @@ class Presenter:
             case ev.Stats():
                 self.stats = event.as_line()
             case ev.Paused(reason=reason):
-                self._before_pause = (self.state, self.did, self.next)
+                if self.state != State.PAUSED.name:
+                    self._before_pause = (self.state, self.did, self.next)
                 self.state, self.did, self.next = State.PAUSED.name, f"Paused: {reason}", "Waiting"
+                if reason.startswith("WASD:"):
+                    self.next = "Отпусти WASD — рыбалка продолжится после паузы"
             case ev.Resumed(state=state):
                 if self._before_pause is not None and self._before_pause[0] == state.name:
                     self.state, self.did, self.next = self._before_pause
@@ -369,15 +388,17 @@ class Presenter:
                 self._before_pause = None
             case ev.Stopped(reason=reason):
                 self.state, self.did, self.next = State.STOPPED.name, f"Stopped ({reason})", "Idle"
+                failed = reason == "error"
+                self.progress = ev.Progress(
+                    event.t,
+                    "error" if failed else "stopped",
+                    "Ошибка — см. журнал" if failed else "Остановлено",
+                )
             case ev.Error(message=message):
                 self.did = f"Error: {message}"
 
     def _describe_result(self, item: object) -> str:
         match item:
-            case CalibrateDone(calibration=cal):
-                self.last_calibration = item
-                ok = "ok" if cal.valid else "no gold icon found; cast first and try again"
-                return f"Calibration: {cal.icon_size_px} px, score {cal.score:.2f} ({ok})"
             case VerifyDone(report=r, recording=path):
                 if r.stands_out:
                     lo = min(b.score for b in r.bites)
@@ -391,40 +412,17 @@ class Presenter:
                     f"Bite check: no bite stood out (everything at most {r.floor:.2f}); try again"
                 )
             case WorkerFailed(what=what, message=message):
+                if what == "start":
+                    self.state, self.did, self.next = (
+                        "STOPPED",
+                        f"Error: {message}",
+                        "Проверь настройки",
+                    )
+                    self.progress = ev.Progress(0, "error", f"Ошибка запуска: {message}")
                 return f"Cannot {what}: {message}"
         return str(item)
 
     # -- setup workers ----------------------------------------------------------------------
-
-    def grab_and_calibrate(self) -> None:
-        threading.Thread(
-            target=self._calibrate_worker, name="wowfish-calibrate", daemon=True
-        ).start()
-
-    def _calibrate_worker(self) -> None:
-        from wowfish.vision.calibrate import calibrate_icon_scale
-        from wowfish.vision.template import load_icon_templates
-
-        try:
-            window = self._find_window("World of Warcraft")
-            if window is None:
-                raise RuntimeError("World of Warcraft window not found; is the game running?")
-            cap = self._get_capturer()
-            cap.open(window)
-            try:
-                frame = cap.grab()
-            finally:
-                cap.close()
-            cal = calibrate_icon_scale(
-                frame, load_icon_templates(), match_width=self.cfg.vision.match_width
-            )
-            thumb, scale = image.thumbnail(frame)
-            side = max(2, round(cal.icon_size_px * scale))
-            box = (round(cal.x * scale - side / 2), round(cal.y * scale - side / 2), side, side)
-            png = image.bgr_to_png_bytes(image.with_box(thumb, box) if cal.valid else thumb)
-            self._results.put(CalibrateDone(cal, png))
-        except Exception as e:
-            self._results.put(WorkerFailed("calibrate", str(e)))
 
     def record_and_verify(self, seconds: float = 60.0, selector: str | None = None) -> None:
         threading.Thread(
@@ -454,7 +452,9 @@ class Presenter:
             path = folder / time.strftime("bite-%Y%m%d-%H%M%S.wav")
             write_wav(path, y, source.sample_rate)
             fps = build_fingerprints()
-            scores = score_recording(y, source.sample_rate, fps, DEFAULT_MEL)
+            scores = score_recording(
+                y, source.sample_rate, fps, DEFAULT_MEL, gain_db=self.cfg.audio.gain_db
+            )
             report = bite_report(scores, fps, DEFAULT_MEL)
             self._results.put(VerifyDone(report, path))
         except Exception as e:
@@ -462,10 +462,14 @@ class Presenter:
 
     @property
     def level_dbfs(self) -> float:
+        if self.running:
+            return self._live_level
         return self._meter.level_dbfs if self._meter is not None else -120.0
 
     @property
     def last_scores(self) -> dict[str, float]:
+        if self.running:
+            return dict(self._live_scores)
         return dict(self._meter.scores) if self._meter is not None else {}
 
     @property

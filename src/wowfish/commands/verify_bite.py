@@ -34,7 +34,7 @@ def verify_bite(
     p = MelParams()
     fps = build_fingerprints(p)
     y, rate = read_wav(recording)
-    scores = score_recording(y, rate, fps, p)
+    scores = score_recording(y, rate, fps, p, gain_db=cfg.audio.gain_db)
     typer.echo(f"{recording}: {len(y) / rate:.1f}s at {rate} Hz")
     peaks = clip_peaks(scores, fps, p)
     for cs in peaks:

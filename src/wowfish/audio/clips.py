@@ -6,10 +6,10 @@ import numpy as np
 
 from wowfish.assets import CLIP_NAMES, clip_path
 from wowfish.audio.features import DEFAULT_MEL, MelParams
-from wowfish.audio.fingerprint import Fingerprint, build_fingerprint
+from wowfish.audio.fingerprint import DEFAULT_ONSET_S, Fingerprint, build_fingerprint
 from wowfish.audio.wav import read_wav, resample
 
-ONSET_S = 0.8
+ONSET_S = DEFAULT_ONSET_S
 
 
 def load_reference_clips(rate: int = 22050) -> dict[str, np.ndarray]:

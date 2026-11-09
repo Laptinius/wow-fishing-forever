@@ -8,13 +8,20 @@ import cv2
 import numpy as np
 
 from wowfish.vision.region import FULL, Region
-from wowfish.vision.template import IconTemplate, resize_template
+from wowfish.vision.template import (
+    IconTemplate,
+    load_icon_templates,
+    resize_template,
+    template_for_size,
+)
 
 NO_MATCH = -1.0
 GOLD_MIN = 0.12  # masked mean of (R - B) / 255; the gold sprite is ~0.3, the grey one ~0
 # Smallest template side, in match-space pixels, that still looks like a gear. Below this the
 # sprite is a warm blob and scores ~0.85 on skin, hair, and wood (seen live: 19 px at 5K -> 7 px).
 MIN_TEMPLATE_PX = 12
+OFF_SCALE = (0.8, 1.25)
+PROMINENCE_MIN = 0.10
 
 
 @dataclass(frozen=True)
@@ -24,9 +31,14 @@ class IconMatch:
     y: int
     size: int  # template side at full-frame scale
     gold: float  # colour gate, see GOLD_MIN
+    prominence: float | None = None
 
     def accepted(self, threshold: float) -> bool:
-        return self.score >= threshold and self.gold >= GOLD_MIN
+        return (
+            self.score >= threshold
+            and self.gold >= GOLD_MIN
+            and (self.prominence is None or self.prominence >= PROMINENCE_MIN)
+        )
 
 
 class IconMatcher:
@@ -46,7 +58,12 @@ class IconMatcher:
         return round(self.template.size * min(1.0, self.match_width / frame_width))
 
     def match(
-        self, frame_bgr: np.ndarray, region: Region | None = None, *, full_width: int | None = None
+        self,
+        frame_bgr: np.ndarray,
+        region: Region | None = None,
+        *,
+        full_width: int | None = None,
+        validate_shape: bool = True,
     ) -> IconMatch:
         """Best match in `frame_bgr` (or its `region`). Pass `full_width` when `frame_bgr` is a
         crop of a wider window so it is downscaled exactly as the whole window would be."""
@@ -76,7 +93,35 @@ class IconMatcher:
         gold = float(gold_map[ly, lx])
         cx = x0 + round((lx + tsize / 2) / scale)
         cy = y0 + round((ly + tsize / 2) / scale)
-        return IconMatch(score, cx, cy, self.template.size, gold)
+        match = IconMatch(score, cx, cy, self.template.size, gold)
+        if validate_shape and score > 0 and gold >= GOLD_MIN:
+            prominence = self._shape_prominence(frame_bgr, match, ref_w)
+            match = IconMatch(score, cx, cy, self.template.size, gold, prominence)
+        return match
+
+    def _shape_prominence(self, frame: np.ndarray, match: IconMatch, full_width: int) -> float:
+        """A gear peaks at its actual size. Terrain often matches several sizes equally well."""
+        height, width = frame.shape[:2]
+        radius = 2 * match.size
+        region = Region(
+            max(0, match.x - radius) / width,
+            max(0, match.y - radius) / height,
+            min(width, match.x + radius) / width,
+            min(height, match.y + radius) / height,
+        )
+        templates = load_icon_templates()
+        alternatives = []
+        for factor in OFF_SCALE:
+            size = max(1, round(match.size * factor))
+            matcher = IconMatcher(template_for_size(templates, size), self.match_width)
+            alternative = matcher.match(
+                frame,
+                region,
+                full_width=full_width,
+                validate_shape=False,
+            )
+            alternatives.append(alternative.score)
+        return match.score - max(alternatives)
 
 
 def _gold_map(crop_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:

@@ -38,7 +38,7 @@ def run(
         ),
     ] = None,
 ) -> None:
-    """Cast, find the bobber, hear the splash, press Interact, loot, repeat. Ctrl-C stops."""
+    """Observe the fishing bar, hear the splash, interact and recast. Ctrl-C stops."""
     cfg = load_config_or_fail()
     try:
         engine = build_engine(
@@ -63,7 +63,7 @@ def run(
                 if not thread.is_alive():
                     break
                 continue
-            if not isinstance(event, ev.Scores):  # the GUI's graph feed, 10 a second
+            if not isinstance(event, (ev.Scores, ev.Progress, ev.FrameObserved)):
                 typer.echo(_line(event))
             if isinstance(event, ev.Stopped):
                 break
@@ -72,8 +72,10 @@ def run(
         thread.stop()
         while not engine.events.empty():
             event = engine.events.get_nowait()
-            if not isinstance(event, ev.Scores):
+            if not isinstance(event, (ev.Scores, ev.Progress, ev.FrameObserved)):
                 typer.echo(_line(event))
+    finally:
+        thread.stop(timeout=8.0)  # wait for audio capture and recording to close
     if record_audio is not None:
         typer.echo(f"wrote {record_audio}", err=True)
     typer.echo(engine.stats.as_line())

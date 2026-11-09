@@ -1,3 +1,5 @@
+[Локальная настройка под пробел и запуск](LOCAL.md)
+
 <div align="center">
 
 <img src="/assets/cover-photo.jpg" alt="AI-generated photo of a bot fishing" width="360" />
@@ -27,8 +29,8 @@
 
 A fishing bot for **World of Warcraft: Forever**, successor to the 2019
 [wow-fishing-bot](https://github.com/rsamf/wow-fishing-forever/tree/60d0710), now with many improvements, so you can now fish *forever*. It watches the
-game window for the built-in interact icon over your bobber, listens to the game's own splash
-sound for the bite, and presses your Interact key.
+game window for the native Fishing / Рыболовля cast bar, listens to the game's own splash
+sound for the bite, and presses your Interact key. Local BAR 4.2 setup and timings are documented in [LOCAL.md](LOCAL.md).
 
 > [!NOTE]
 > 🎉 **Announcement** This was my very first Python project but, surprisingly, my most popular repo on GitHub. 
@@ -91,8 +93,7 @@ In the game:
 1. *Options > Gameplay > Controls*: enable **Auto Loot**.
 2. *Options > Keybindings > Targeting*: bind **Interact With Target**. wowfish assumes `f`.
 3. Put **Fishing** on an action bar key. wowfish assumes `1`.
-4. Type `/console SoftTargetIconGameObject 1` once. This shows the gold gear icon over your
-   bobber whenever it is close enough to interact with.
+4. Keep the native fishing cast bar visible. The working loop does not require the gold gear icon.
 5. *Options > Sound*: set **Ambience** and **Music** to 0 and keep **Sound Effects** up.
 
 
@@ -108,7 +109,7 @@ Or run it from terminal:
 
     wowfish doctor                      # checks the compatibility with this machine
     wowfish config                      # creates the config file; edit cast_key / interact_key
-    wowfish run                         # measures the icon on its first cast; Ctrl-C stops
+    wowfish run                         # observes the fishing bar; Ctrl-C stops
 
 While the bot is running, keep the water in view and the game client in focus.
 
@@ -132,12 +133,17 @@ Add `--verbose` before any command for debug logging. `doctor` prints the log fi
 
 ## How It Works
 
-This bot looks at pixels and listens to sound, and it presses the keys to cast and loot. It does not read memory, inject code, inject network traffic, or rely on an addon.
+The local BAR 4.2 loop reads screen pixels and process audio, then sends the configured keys.
+It does not read game memory or inject code. The local Space profile uses the existing
+Forever Fishing key binding; it does not install or modify the addon.
 
-1. **Cast**: It casts using your specified cast key. Each key press is simulated with a `key_hold_ms` timer.
-2. **Detect bobber**: WoW draws a gold gear sprite over the bobber when it is in interact
-range. If you do not see the gold gear sprite above the bobber, that means the bobber is out of range for the interact key to work, so the bot will recast. The bot will scan for the sprite using template matching from OpenCV, and it matches it against the game window with a masked, mean-subtracted template match. If it doesn't find it, it will recast until it does. 
-3. **Detect bite**: WoW plays one of its splash clips when a fish bites. The bot fingerprints the first 0.8 seconds of each as a log-mel spectrogram with the gain removed. If there's a match, the bot will simulate the interact key, and auto-loot should pick up your fish. After all that, the bot recasts.
+1. **Observe:** identify the full native fishing bar and its RU/EN label, including near-empty fill.
+2. **Listen:** while the bar is visible, recognize a splash and recheck the current cast before Interact.
+3. **Recover:** after observed absence, recast; after a hook, use a shorter confirmation delay.
+   Manual casts cancel pending automatic actions. WASD and focus checks guard every key press.
+
+Timing, controls, limitations and validation are maintained in [LOCAL.md](LOCAL.md).
+The standalone `calibrate` and `watch` commands remain available as optional icon diagnostics.
 
 ## License
 

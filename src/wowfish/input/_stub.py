@@ -10,3 +10,6 @@ class StubInputDevice:
 
     def is_game_focused(self, window: WindowRef) -> bool | None:
         return None
+
+    def movement_keys_down(self) -> bool:
+        return False

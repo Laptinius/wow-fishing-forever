@@ -23,3 +23,6 @@ superpowers/
 
 # Playwright
 .playwright-mcp/
+
+# Local runtime, calibration, logs and verification recordings
+/runtime/

@@ -12,6 +12,7 @@ import tomli_w
 
 from wowfish import paths
 from wowfish.assets import default_config_path
+from wowfish.vision.region import Region
 
 _LINE_RE = re.compile(r"\(at line (\d+), column \d+\)")
 
@@ -33,6 +34,7 @@ class GameConfig:
     cast_key: str = "1"
     interact_key: str = "f"
     session_minutes: int = 0
+    recast_key: str = "ctrl+space"
 
 
 @dataclass(frozen=True)
@@ -41,14 +43,21 @@ class VisionConfig:
     icon_native_size: int = 0
     icon_threshold: float = 0.75
     match_width: int = 1920
+    cast_bar_region: str = "auto"
+
+    def bar_region(self) -> Region | None:
+        if self.cast_bar_region in ("", "auto"):
+            return None
+        return Region(*(float(value) for value in self.cast_bar_region.split(",")))
 
 
 @dataclass(frozen=True)
 class AudioConfig:
     capture: str = "game"  # "game": the game's own audio stream; "device": the loopback `device`
     device: str = ""
-    bite_threshold: float = 0.66
+    bite_threshold: float = 0.64
     refractory_s: float = 3.0
+    gain_db: float = 0.0
 
     @property
     def selector(self) -> str:
@@ -58,12 +67,13 @@ class AudioConfig:
 
 @dataclass(frozen=True)
 class RunConfig:
-    icon_timeout_s: float = 4.0
-    cast_timeout_s: float = 30.0
+    recast_delay_s: float = 2.0
+    post_catch_delay_s: float = 0.3
+    bite_arm_s: float = 0.75
     loot_timeout_s: float = 3.0
-    pause_min_s: float = 0.5
-    pause_max_s: float = 2.0
     key_hold_ms: int = 60
+    movement_pause_enabled: bool = True
+    movement_pause_s: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -125,6 +135,15 @@ def _build_section(
     known = {f.name: f for f in fields(cls)}
     kwargs: dict[str, Any] = {}
     for key, value in table.items():
+        if section == "run" and key in {
+            "icon_timeout_s",
+            "cast_timeout_s",
+            "pause_min_s",
+            "pause_max_s",
+            "movement_pause_min_s",
+            "movement_pause_max_s",
+        }:
+            continue  # Old polling/random-delay settings do not govern the bar-driven loop.
         if key not in known:
             warnings.append(f"unknown key {section}.{key} ignored")
             continue
@@ -157,16 +176,27 @@ def _validate(path: Path, cfg: Config) -> None:
     check(v.match_width >= 320, "vision.match_width", "must be at least 320")
     check(v.icon_size_px >= 0, "vision.icon_size_px", "must be 0 or positive")
     check(v.icon_native_size >= 0, "vision.icon_native_size", "must be 0 or positive")
+    try:
+        v.bar_region()
+    except (TypeError, ValueError) as e:
+        raise ConfigError(
+            path, "vision.cast_bar_region must be auto or left,top,right,bottom in 0..1"
+        ) from e
     check(a.capture in ("game", "device"), "audio.capture", 'must be "game" or "device"')
     check(0.0 < a.bite_threshold <= 1.0, "audio.bite_threshold", "must be in (0, 1]")
     check(a.refractory_s >= 0.0, "audio.refractory_s", "must be 0 or positive")
+    check(0.0 <= a.gain_db <= 60.0, "audio.gain_db", "must be between 0 and 60")
     r = cfg.run
-    check(r.icon_timeout_s > 0, "run.icon_timeout_s", "must be positive")
-    check(r.cast_timeout_s > 0, "run.cast_timeout_s", "must be positive")
-    check(r.loot_timeout_s > 0, "run.loot_timeout_s", "must be positive")
-    check(r.pause_min_s >= 0, "run.pause_min_s", "must be 0 or positive")
-    check(r.pause_min_s <= r.pause_max_s, "run.pause_min_s", "must not exceed run.pause_max_s")
+    check(0.5 <= r.recast_delay_s <= 30, "run.recast_delay_s", "must be between 0.5 and 30")
+    check(0.1 <= r.post_catch_delay_s <= 5, "run.post_catch_delay_s", "must be between 0.1 and 5")
+    check(0 <= r.bite_arm_s <= 3, "run.bite_arm_s", "must be between 0 and 3")
+    check(0.5 <= r.loot_timeout_s <= 10, "run.loot_timeout_s", "must be between 0.5 and 10")
     check(10 <= r.key_hold_ms <= 500, "run.key_hold_ms", "must be between 10 and 500")
+    check(
+        0 <= r.movement_pause_s <= 60,
+        "run.movement_pause_s",
+        "must be between 0 and 60",
+    )
 
 
 def to_toml(cfg: Config) -> str:

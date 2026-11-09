@@ -40,15 +40,17 @@ class BiteDetector:
         fingerprints: Sequence[Fingerprint],
         p: MelParams = DEFAULT_MEL,
         *,
-        threshold: float = 0.66,
+        threshold: float = 0.64,
         refractory_s: float = 3.0,
         min_consecutive: int = 1,
+        gain_db: float = 0.0,
     ) -> None:
         self.fingerprints = tuple(fingerprints)
         self.p = p
         self.threshold = threshold
         self.refractory_s = refractory_s
         self.min_consecutive = min_consecutive
+        self.gain = 10.0 ** (gain_db / 20.0)
         names = [fp.name for fp in self.fingerprints]
         self._max_len = max(fp.length for fp in self.fingerprints)
         self._pending = np.zeros(0, dtype=np.float32)
@@ -106,7 +108,7 @@ class BiteDetector:
                 f"chunk sample rate {chunk.sample_rate} != {p.sample_rate}; "
                 "resample in the source, not per chunk"
             )
-        samples = np.asarray(chunk.samples, dtype=np.float32)
+        samples = np.asarray(chunk.samples, dtype=np.float32) * self.gain
         if len(samples):
             rms = float(np.sqrt(np.mean(samples * samples)))
             self._level_dbfs = 20.0 * math.log10(rms + 1e-9)
@@ -181,4 +183,5 @@ def detector_for(audio: AudioConfig, *, threshold: float | None = None) -> BiteD
         build_fingerprints(),
         threshold=audio.bite_threshold if threshold is None else threshold,
         refractory_s=audio.refractory_s,
+        gain_db=audio.gain_db,
     )

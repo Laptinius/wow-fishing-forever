@@ -17,6 +17,10 @@ class InputDevice(Protocol):
         """True/False when the backend can tell which window has keyboard focus, else None."""
         ...
 
+    def movement_keys_down(self) -> bool:
+        """Whether any WASD key is currently held; call only while the game is focused."""
+        ...
+
 
 def get_input_device() -> InputDevice:
     import sys

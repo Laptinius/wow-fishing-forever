@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
 
 import cv2
 import numpy as np
@@ -19,6 +20,7 @@ class IconTemplate:
     mask: np.ndarray  # (size, size) uint8, 255 where the sprite is opaque
 
 
+@cache
 def load_icon_templates() -> tuple[IconTemplate, ...]:
     out: list[IconTemplate] = []
     for n in ICON_SIZES:

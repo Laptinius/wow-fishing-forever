@@ -22,26 +22,6 @@ class StateChanged(Event):
 
 
 @dataclass(frozen=True)
-class IconFound(Event):
-    thumbnail: np.ndarray  # the full frame fed to the matcher, <= 480 px wide, BGR
-    box: tuple[int, int, int, int]  # x, y, w, h in thumbnail pixels
-    score: float
-    size: int  # icon side in window pixels
-    where: tuple[int, int]  # icon centre in window pixels
-
-
-@dataclass(frozen=True)
-class Calibrated(Event):
-    size: int  # icon side in window pixels, measured on this frame
-    score: float
-
-
-@dataclass(frozen=True)
-class IconLost(Event):
-    pass
-
-
-@dataclass(frozen=True)
 class BiteHeard(Event):
     clip: str
     score: float
@@ -80,6 +60,26 @@ class Scores(Event):
 
     peaks: dict[str, float]  # each clip's highest score in this slice; -1.0 = silent
     threshold: float  # the bite_threshold the detector is comparing against
+    level_dbfs: float = -120.0
+
+
+@dataclass(frozen=True)
+class Progress(Event):
+    kind: str
+    text: str
+    fraction: float = 0.0
+    remaining_s: float | None = None
+
+
+@dataclass(frozen=True)
+class FrameObserved(Event):
+    thumbnail: np.ndarray
+    box: tuple[int, int, int, int] | None
+
+
+@dataclass(frozen=True)
+class CastSeen(Event):
+    manual: bool
 
 
 @dataclass(frozen=True)

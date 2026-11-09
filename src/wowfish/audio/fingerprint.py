@@ -10,6 +10,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from wowfish.audio.features import SILENCE_LEVEL_DB, MelParams, log_mel
 
 NO_SCORE = -1.0
+DEFAULT_ONSET_S = 0.6
 _BLOCK = 2048  # windows scored per batch; keeps the normalised-window buffer under ~100 MB
 
 
@@ -32,7 +33,7 @@ def normalize_block(feats: np.ndarray) -> np.ndarray:
 
 
 def build_fingerprint(
-    name: str, samples: np.ndarray, p: MelParams, onset_s: float = 0.8
+    name: str, samples: np.ndarray, p: MelParams, onset_s: float = DEFAULT_ONSET_S
 ) -> Fingerprint:
     feats = log_mel(samples[: int(onset_s * p.sample_rate)], p)
     if len(feats) < 2:

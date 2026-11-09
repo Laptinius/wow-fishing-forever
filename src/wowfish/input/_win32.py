@@ -44,6 +44,8 @@ class Win32InputDevice:
     def __init__(self) -> None:
         self._u = _user32()
         self._u.GetForegroundWindow.restype = wintypes.HWND  # unsigned: handles can have bit 31 set
+        self._u.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        self._u.GetAsyncKeyState.restype = ctypes.c_short
         self._u.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
         self._u.MapVirtualKeyW.restype = wintypes.UINT
         self._u.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
@@ -64,14 +66,25 @@ class Win32InputDevice:
         name = normalize_key(key)
         if not is_supported_key(name):
             raise InputUnavailable(f"key {key!r} (not a supported key name)")
-        scan = self._u.MapVirtualKeyW(VK_CODES[name], 0)  # MAPVK_VK_TO_VSC
-        if not scan:
+        scans = [self._u.MapVirtualKeyW(VK_CODES[part], 0) for part in name.split("+")]
+        if not all(scans):
             raise InputUnavailable(f"key {key!r} (no scan code)")
-        self._send(scan, up=False)
-        time.sleep(hold_s)
-        self._send(scan, up=True)
+        pressed = []
+        try:
+            for scan in scans:
+                self._send(scan, up=False)
+                pressed.append(scan)
+            time.sleep(hold_s)
+        finally:
+            for scan in reversed(pressed):
+                self._send(scan, up=True)
 
     def is_game_focused(self, window: WindowRef) -> bool | None:
         if window.handle is None:
             return None
-        return int(self._u.GetForegroundWindow()) == int(window.handle)
+        foreground = self._u.GetForegroundWindow()
+        return bool(foreground) and int(foreground) == int(window.handle)
+
+    def movement_keys_down(self) -> bool:
+        """Read the physical WASD positions without a keyboard hook or changing input."""
+        return any(self._u.GetAsyncKeyState(ord(key)) & 0x8000 for key in "WASD")

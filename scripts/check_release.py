@@ -24,6 +24,7 @@ def check_assets_present(root: Path) -> None:
     clips = ("fishingbobber_1", "fishingbobber_2", "fishingbobber_3", "fishbite")
     expected += [assets / "clips" / f"{n}.wav" for n in clips]
     expected += [assets / "default_config"]
+    expected += [assets / "fishing_bar" / f"label-{language}.png" for language in ("ru", "en")]
     missing = [str(p.relative_to(root)) for p in expected if not p.is_file()]
     if missing:
         print(f"error: missing package assets: {', '.join(missing)}", file=sys.stderr)

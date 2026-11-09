@@ -1,19 +1,17 @@
-"""Setup tab: prerequisites, keys, audio device with a live meter, calibration, bite check."""
+"""Setup tab: keys, fishing-bar instructions, audio meter and bite check."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from wowfish.gui import image
-from wowfish.gui.presenter import CalibrateDone, Presenter, VerifyDone, View
+from wowfish.gui.presenter import Presenter, VerifyDone, View
 
 CHECKLIST = (
-    "In the game, before starting:\n"
-    "  1. Stand at the water with Fishing on an action bar key (the cast key below).\n"
-    "  2. Bind Interact With Target (Options > Keybindings > Targeting) to the interact key.\n"
-    "  3. Enable Auto Loot (Options > Controls).\n"
-    "  4. Type /console SoftTargetIconGameObject 1 once (shows the gold gear over the bobber).\n"
-    "  5. Set Ambience and Music to 0 so the splash is easy to hear."
+    "Перед запуском:\n"
+    "  1. Встань у воды и открой Forever Fishing.\n"  # noqa: RUF001
+    "  2. Проверь, что выбранные клавиши забрасывают удочку и подсекают.\n"
+    "  3. Включи автоматический сбор добычи (Auto Loot).\n"  # noqa: RUF001
+    "  4. Оставь центральную полоску рыбалки видимой, звук эффектов — включённым."
 )
 
 
@@ -85,27 +83,12 @@ class SetupPage:
         self.bite_note = tb.Label(bite_row, text="A splash must score at least this to count.")
         self.bite_note.pack(side="left", padx=6)
 
-        cal = tb.Labelframe(f, text="Icon calibration (what the bot looks for)", padding=8)
-        cal.pack(fill="both", expand=True, pady=4)
-        tb.Button(
-            cal,
-            text="Grab the game window and calibrate",
-            command=self.p.grab_and_calibrate,
-            bootstyle="info",
-        ).grid(row=0, column=0, sticky="w")
-        self.cal_note = tb.Label(cal, text="Cast first so the gold gear icon is on screen.")
-        self.cal_note.grid(row=0, column=1, sticky="w", padx=6)
-        self.save_cal = tb.Button(
-            cal,
-            text="Save calibration",
-            command=self._save_cal,
-            bootstyle="success",
-            state="disabled",
-        )
-        self.save_cal.grid(row=0, column=2, padx=6)
-        self.cal_image = tb.Label(cal)
-        self.cal_image.grid(row=1, column=0, columnspan=3, pady=(8, 0), sticky="w")
-        self._photo = None
+        tb.Label(
+            f,
+            text="Полоска рыбалки распознаётся автоматически: Fishing / Рыболовля.\n"
+            "Держи её видимой. Шестерёнка и положение поплавка не нужны.",
+            justify="left",
+        ).pack(anchor="w", pady=12)
 
     # -- actions ----------------------------------------------------------------------------
 
@@ -139,10 +122,6 @@ class SetupPage:
             return
         self.bite_note.configure(text=f"saved {saved:.2f}; used from the next Start")
 
-    def _save_cal(self) -> None:
-        self.p.save_calibration()
-        self.cal_note.configure(text=self.cal_note.cget("text") + "  (saved)")
-
     # -- rendering --------------------------------------------------------------------------
 
     def render(self, view: View) -> None:
@@ -152,19 +131,7 @@ class SetupPage:
         level = "silent" if view.level_dbfs <= -60 else f"{view.level_dbfs:5.1f} dBFS"
         self.level_text.configure(text=f"{level}   best bite score {best:.2f}")
         for item in view.log_events:
-            if isinstance(item, CalibrateDone):
-                cal = item.calibration
-                self._photo = image.photo_from_png(item.thumbnail_png)
-                self.cal_image.configure(image=self._photo)
-                if cal.valid:
-                    self.cal_note.configure(text=f"{cal.icon_size_px} px, score {cal.score:.2f}")
-                    self.save_cal.configure(state="normal")
-                else:
-                    self.cal_note.configure(
-                        text="No gold gear icon in that frame; cast and try again."
-                    )
-                    self.save_cal.configure(state="disabled")
-            elif isinstance(item, VerifyDone):
+            if isinstance(item, VerifyDone):
                 self.verify_note.configure(text=view.new_lines[view.log_events.index(item)])
                 if item.report.stands_out:  # suggest, but only Save changes the config
                     self.bite.delete(0, "end")

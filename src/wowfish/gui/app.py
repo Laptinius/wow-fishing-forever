@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import sys
 
 from wowfish import __version__
 from wowfish.gui.fish_page import FishPage
@@ -16,16 +17,20 @@ class App:
     def __init__(self, presenter: Presenter | None = None) -> None:
         import ttkbootstrap as tb
 
+        if sys.platform == "win32":
+            from wowfish.capture._win32 import set_dpi_aware
+
+            set_dpi_aware()  # Windows fixes DPI awareness when the first window is created.
         self.p = presenter or Presenter()
         self.root = tb.Window(
-            themename="bootstrap-dark", title=f"wowfish {__version__}", minsize=(900, 640)
+            themename="bootstrap-dark", title=f"wowfish {__version__} | BAR 4.2", minsize=(900, 640)
         )
         nb = tb.Notebook(self.root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         self.setup = SetupPage(nb, self.p)
         self.fish = FishPage(nb, self.p)
-        nb.add(self.setup.frame, text="Setup")
-        nb.add(self.fish.frame, text="Fish")
+        nb.add(self.setup.frame, text="Настройки")
+        nb.add(self.fish.frame, text="Рыбалка")
         if not self.p.prerequisites():
             nb.select(1)
         self.root.protocol("WM_DELETE_WINDOW", self.close)

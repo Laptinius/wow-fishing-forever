@@ -57,15 +57,23 @@ class X11InputDevice:
         name = normalize_key(key)
         if not is_supported_key(name):
             raise InputUnavailable(f"key {key!r} (not a supported key name)")
-        keysym = XK.string_to_keysym(X11_NAMES[name])
-        keycode = self._d.keysym_to_keycode(keysym)
-        if not keycode:
+        keycodes = [
+            self._d.keysym_to_keycode(XK.string_to_keysym(X11_NAMES[part]))
+            for part in name.split("+")
+        ]
+        if not all(keycodes):
             raise InputUnavailable(f"key {key!r} (no keycode on this keyboard layout)")
-        xtest.fake_input(self._d, X.KeyPress, keycode)
-        self._d.sync()
-        time.sleep(hold_s)
-        xtest.fake_input(self._d, X.KeyRelease, keycode)
-        self._d.sync()
+        pressed = []
+        try:
+            for keycode in keycodes:
+                xtest.fake_input(self._d, X.KeyPress, keycode)
+                pressed.append(keycode)
+            self._d.sync()
+            time.sleep(hold_s)
+        finally:
+            for keycode in reversed(pressed):
+                xtest.fake_input(self._d, X.KeyRelease, keycode)
+            self._d.sync()
 
     def is_game_focused(self, window: WindowRef) -> bool | None:
         if window.handle is None:
@@ -88,3 +96,10 @@ class X11InputDevice:
                 return False  # reached the root (python-xlib gives an int there)
             w = parent
         return False
+
+    def movement_keys_down(self) -> bool:
+        from Xlib import XK
+
+        held = self._d.query_keymap()
+        codes = [self._d.keysym_to_keycode(XK.string_to_keysym(key)) for key in "wasd"]
+        return any(code and held[code // 8] & (1 << (code % 8)) for code in codes)

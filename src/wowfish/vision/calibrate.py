@@ -7,7 +7,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from wowfish.vision.matcher import GOLD_MIN, NO_MATCH, IconMatch, IconMatcher
+from wowfish.vision.matcher import (
+    GOLD_MIN,
+    NO_MATCH,
+    OFF_SCALE,
+    PROMINENCE_MIN,
+    IconMatch,
+    IconMatcher,
+)
 from wowfish.vision.region import Region
 from wowfish.vision.template import IconTemplate, template_for_size
 
@@ -18,8 +25,6 @@ ANCHORS = 3
 MIN_VALID_SCORE = 0.75  # real gears score 0.8-0.95; skin and UI gold at the wrong size peak ~0.7
 # A real gear's score peaks sharply by size: at 0.8x and 1.25x the right side it drops >= 0.25.
 # A warm blob (skin, hair, a gold ring) scores about the same at every size (drop <= 0.10).
-OFF_SCALE = (0.8, 1.25)
-PROMINENCE_MIN = 0.15
 
 
 @dataclass(frozen=True)
@@ -73,7 +78,11 @@ def calibrate_icon_scale(
     pad = max(sizes) + 48
 
     def run(side: int, region: Region | None = None) -> IconMatch:
-        return IconMatcher(template_for_size(templates, side), match_width).match(frame_bgr, region)
+        return IconMatcher(template_for_size(templates, side), match_width).match(
+            frame_bgr,
+            region,
+            validate_shape=False,
+        )
 
     probes = sorted((run(s) for s in probe_sizes), key=_ranked, reverse=True)
     spots: list[tuple[int, int]] = []

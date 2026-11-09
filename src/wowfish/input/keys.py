@@ -9,10 +9,14 @@ _DIGITS = tuple(string.digits)
 _FKEYS = tuple(f"f{i}" for i in range(1, 13))
 _NAMED = ("space", "enter", "tab", "escape")
 _PUNCT = ("-", "=", "[", "]", ";", "'", ",", ".", "/", "`", "\\")
+_MODIFIERS = ("ctrl", "shift", "alt")
 
 SUPPORTED_KEYS: tuple[str, ...] = _LETTERS + _DIGITS + _FKEYS + _NAMED + _PUNCT
 
 _X11_SPECIAL = {
+    "ctrl": "Control_L",
+    "shift": "Shift_L",
+    "alt": "Alt_L",
     "space": "space",
     "enter": "Return",
     "tab": "Tab",
@@ -37,6 +41,9 @@ X11_NAMES: dict[str, str] = {
 }
 
 _VK_SPECIAL = {
+    "ctrl": 0xA2,
+    "shift": 0xA0,
+    "alt": 0xA4,
     "space": 0x20,
     "enter": 0x0D,
     "tab": 0x09,
@@ -62,8 +69,14 @@ VK_CODES: dict[str, int] = {
 
 
 def normalize_key(name: str) -> str:
-    return name.strip().lower()
+    return "+".join(part.strip().lower() for part in name.split("+"))
 
 
 def is_supported_key(name: str) -> bool:
-    return normalize_key(name) in SUPPORTED_KEYS
+    parts = normalize_key(name).split("+")
+    modifiers = parts[:-1]
+    return (
+        parts[-1] in SUPPORTED_KEYS
+        and all(part in _MODIFIERS for part in modifiers)
+        and len(modifiers) == len(set(modifiers))
+    )
