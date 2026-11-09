@@ -26,3 +26,6 @@ superpowers/
 
 # Local runtime, calibration, logs and verification recordings
 /runtime/
+/Lib/
+/Scripts/
+/pyvenv.cfg
